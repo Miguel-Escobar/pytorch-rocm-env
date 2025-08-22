@@ -1,72 +1,125 @@
 {
+  description = "A Python Package";
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    nixpkgs-python.url = "github:cachix/nixpkgs-python";
-    nixpkgs-python.inputs = { nixpkgs.follows = "nixpkgs"; };
-
-    systems.url = "github:nix-systems/default";
-    devenv.url = "github:cachix/devenv";
-    devenv.inputs.nixpkgs.follows = "nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  nixConfig = {
-    extra-trusted-public-keys = "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=";
-    extra-substituters = "https://devenv.cachix.org";
-    rocmSupport = true;
-  };
-
-  outputs = { self, nixpkgs, devenv, systems, ... } @ inputs:
-    let
-      forEachSystem = nixpkgs.lib.genAttrs (import systems);
-    in
+  outputs =
     {
-      packages = forEachSystem (system: {
-        devenv-up = self.devShells.${system}.default.config.procfileScript;
-        devenv-test = self.devShells.${system}.default.config.test;
-      });
+      self,
+      nixpkgs,
+      flake-utils,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        ## Import nixpkgs:
+        pkgs = import nixpkgs { inherit system; };
 
-      devShells = forEachSystem
-        (system:
-          let
-            pkgs = import nixpkgs {
-              inherit system;
-              config = {
-                allowUnfree = true;
-                rocmSupport = true;
-              };
-            };
-          in
-          {
-            default = devenv.lib.mkShell {
-              inherit inputs pkgs;
-              modules = [
-                ({ pkgs, config, inputs, ... }:
-                  {
-                    # https://devenv.sh/packages/
-                    packages = [
-                      pkgs.git
-                      pkgs.python312Packages.torchWithRocm
-                      pkgs.python312Packages.torchvision
-                    ];
+        ## Read pyproject.toml file:
+        pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
 
-                    # https://devenv.sh/languages/
-                    languages.python.enable = true;
-                    languages.python.version = "3.12.8";
-                    languages.python.venv.enable = true;
-                    languages.python.venv.requirements = ./requirements.txt;
+        ## Get project specification:
+        project = pyproject.project;
 
-                    scripts.hello.exec = ''
-                      echo hello!
-                    '';
+        ## Get the package:
+        package = pkgs.python313Packages.buildPythonPackage {
+          ## Set the package name:
+          pname = project.name;
 
-                    # https://devenv.sh/tests/
-                    enterTest = ''
-                      echo "Running tests"
-                      git --version | grep --color=auto "${pkgs.git.version}"
-                    '';
-                  })
-              ];
-            };
-          });
-    };
+          ## Inherit the package version:
+          inherit (project) version;
+
+          ## Set the package format:
+          format = "pyproject";
+
+          ## Set the package source:
+          src = ./.;
+
+          ## Specify the build system to use:
+          build-system = with pkgs.python3Packages; [
+            setuptools
+          ];
+
+          ## Specify test dependencies:
+          nativeCheckInputs = [
+            ## Python dependencies:
+            pkgs.python3Packages.mypy
+            pkgs.python3Packages.nox
+            pkgs.python3Packages.pytest
+            pkgs.python3Packages.ruff
+
+            ## Non-Python dependencies:
+            pkgs.taplo
+          ];
+
+          ## Define the check phase:
+          checkPhase = ''
+            runHook preCheck
+            nox
+            runHook postCheck
+          '';
+
+          ## Specify production dependencies:
+          propagatedBuildInputs = [
+            pkgs.python3Packages.click
+            pkgs.python3Packages.numpy
+            pkgs.python313Packages.torchWithRocm
+          ];
+        };
+
+        ## Make our package editable:
+        editablePackage = pkgs.python3.pkgs.mkPythonEditablePackage {
+          pname = project.name;
+          inherit (project) scripts version;
+          root = "$PWD";
+        };
+      in
+      {
+        ## Project packages output:
+        packages = {
+          "${project.name}" = package;
+          default = self.packages.${system}.${project.name};
+        };
+
+        ## Project development shell output:
+        devShells = {
+          default = pkgs.mkShell {
+            inputsFrom = [
+              package
+            ];
+
+            buildInputs = [
+              #################
+              ## OUR PACKAGE ##
+              #################
+
+              editablePackage
+
+              #################
+              # VARIOUS TOOLS #
+              #################
+
+              pkgs.python3Packages.build
+              pkgs.python3Packages.ipython
+
+              ####################
+              # EDITOR/LSP TOOLS #
+              ####################
+
+              # LSP server:
+              pkgs.python3Packages.python-lsp-server
+
+              # LSP server plugins of interest:
+              pkgs.python3Packages.pylsp-mypy
+              pkgs.python3Packages.pylsp-rope
+              pkgs.python3Packages.python-lsp-ruff
+            ];
+          };
+        };
+      }
+    );
 }
