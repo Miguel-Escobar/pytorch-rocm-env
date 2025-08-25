@@ -19,6 +19,9 @@
         ## Import nixpkgs:
         pkgs = import nixpkgs { inherit system; };
 
+        ## Import the lib thingamajig
+        inherit (nixpkgs) lib;
+
         ## Read pyproject.toml file:
         pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
 
@@ -40,19 +43,20 @@
           src = ./.;
 
           ## Specify the build system to use:
-          build-system = with pkgs.python3Packages; [
+          build-system = with pkgs.python313Packages; [
             setuptools
           ];
 
           ## Specify test dependencies:
           nativeCheckInputs = [
             ## Python dependencies:
-            pkgs.python3Packages.mypy
-            pkgs.python3Packages.nox
-            pkgs.python3Packages.pytest
-            pkgs.python3Packages.ruff
+            pkgs.python313Packages.mypy
+            pkgs.python313Packages.nox
+            pkgs.python313Packages.pytest
+            pkgs.python313Packages.ruff
 
             ## Non-Python dependencies:
+            pkgs.uv
             pkgs.taplo
           ];
 
@@ -65,21 +69,21 @@
 
           ## Specify production dependencies:
           propagatedBuildInputs = [
-            pkgs.python3Packages.click
-            pkgs.python3Packages.numpy
+            pkgs.python313Packages.click
+            pkgs.python313Packages.numpy
             pkgs.python313Packages.torchWithRocm
           ];
         };
 
         ## Make our package editable:
-        editablePackage = pkgs.python3.pkgs.mkPythonEditablePackage {
+        editablePackage = pkgs.python313.pkgs.mkPythonEditablePackage {
           pname = project.name;
           inherit (project) scripts version;
           root = "$PWD";
         };
       in
       {
-        ## Project packages output:
+        ## Project packages output. This does not work on its own, the propagated build inputs must match. For now this is fine as I will only ever use the devshells until future notice:
         packages = {
           "${project.name}" = package;
           default = self.packages.${system}.${project.name};

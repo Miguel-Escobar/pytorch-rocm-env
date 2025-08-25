@@ -21,7 +21,11 @@ classifiers = [
   "Typing :: Typed",
 ]
 
-dependencies = ["click", "numpy"]
+dependencies = [
+  "click",
+  "matplotlib>=3.10.5",
+  "numpy",
+]
 
 [project.optional-dependencies]
 
